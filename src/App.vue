@@ -272,6 +272,7 @@ button {
 video {
   clear:both;
   height:400px;
+  margin-left: 20px;
 }
 
 </style>
