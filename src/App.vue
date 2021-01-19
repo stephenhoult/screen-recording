@@ -19,24 +19,32 @@
       </button>
     </div>
 
-    <video
-        v-if="(source === 'camera' || source === 'screen') && isRecording"
-        :src-object.prop.camel="stream"
-        autoplay
-    />
 
-    <video
-        v-if="source === 'both' && isRecording"
-        :src-object.prop.camel="stream"
-        autoplay
-    />
+    <div v-if="isRecording">
+      <video
+          v-for="stream in streams"
+          :key="stream.id"
+          :src-object.prop.camel="stream"
+          autoplay
+      />
+    </div>
 
-    <div v-if="url !== ''">
+    <div v-if="mainBufferUrl !== ''">
       <p class="green">Video recorded.</p>
 
-      <input type="text" v-model="filename" placeholder="File name...">
+      <input type="text" v-model="mainBufferFilename" placeholder="File name...">
 
-      <a :href="url" :download="downloadLink" >
+      <a :href="mainBufferUrl" :download="mainBufferDownloadLink" >
+        <button>
+          Download
+        </button>
+      </a>
+    </div>
+
+    <div v-if="secondaryBufferUrl !== ''">
+      <input type="text" v-model="secondaryBufferFilename" placeholder="File name...">
+
+      <a :href="secondaryBufferUrl" :download="secondaryBufferDownloadLink" >
         <button>
           Download
         </button>
@@ -51,12 +59,22 @@
 export default {
   name: 'App',
   computed: {
-    downloadLink: function() {
-      if (this.url !== '') {
-        if (this.filename !== '') {
-          return this.filename + '.webm';
+    mainBufferDownloadLink() {
+      if (this.mainBufferUrl !== '') {
+        if (this.mainBufferFilename !== '') {
+          return this.mainBufferFilename + '.webm';
         } else {
-          return this.url + '.webm';
+          return this.mainBufferUrl + '.webm';
+        }
+      }
+      return '';
+    },
+    secondaryBufferDownloadLink() {
+      if (this.secondaryBufferUrl !== '') {
+        if (this.secondaryBufferFilename !== '') {
+          return this.secondaryBufferFilename + '.webm';
+        } else {
+          return this.secondaryBufferUrl + '.webm';
         }
       }
       return '';
@@ -74,30 +92,45 @@ export default {
           cursor: "always",
         },
       },
-      filename: '',
       isRecording: false,
       options: { mimeType: "video/webm; codecs=vp9" },
-      mediaRecorder: {},
-      recordedChunks: [],
+      mediaRecorders: [],
+      mainBuffer: [],
+      mainBufferFilename: '',
+      mainBufferUrl: '',
+      secondaryBuffer: [],
+      secondaryBufferFilename: '',
+      secondaryBufferUrl: '',
       source: '',
-      stream: {},
-      url: '',
+      streams: [],
     }
   },
   methods: {
-    createVideo() {
-      let blob = new Blob(this.recordedChunks, {
+    createVideo(buffer, type) {
+      let blob = new Blob(buffer, {
         type: "video/webm",
       });
-      this.createDownloadLink(blob);
+      this.createDownloadLink(blob, type);
     },
-    createDownloadLink(blob) {
-      this.url =  URL.createObjectURL(blob);
+    createDownloadLink(blob, type) {
+      if (type === 'main') {
+        this.mainBufferUrl =  URL.createObjectURL(blob);
+      } else if (type === 'secondary') {
+        this.secondaryBufferUrl =  URL.createObjectURL(blob);
+      }
     },
-    handleDataAvailable(event) {
+    handleMainBuffer(event) {
       if (event.data.size > 0) {
-        this.recordedChunks.push(event.data);
-        this.createVideo();
+        this.mainBuffer.push(event.data);
+        this.createVideo(this.mainBuffer, 'main');
+      } else {
+        console.log('No data available')
+      }
+    },
+    handleSecondaryBuffer(event) {
+      if (event.data.size > 0) {
+        this.secondaryBuffer.push(event.data);
+        this.createVideo(this.secondaryBuffer, 'secondary');
       } else {
         console.log('No data available')
       }
@@ -109,26 +142,75 @@ export default {
 
       try {
 
-        // what are we trying to record
+        // we're recording a single source
         if (source === 'camera' || source === 'screen') {
 
+          let stream;
           if (source === 'camera') {
-            this.stream = await navigator.mediaDevices.getUserMedia(this.displayOptions);
-          } else {
-            this.stream = await navigator.mediaDevices.getDisplayMedia(this.displayOptions);
+            stream = await navigator.mediaDevices.getUserMedia(this.displayOptions);
+            this.streams.push(stream);
+          } else if (screen) {
+            stream = await navigator.mediaDevices.getDisplayMedia(this.displayOptions);
+            this.streams.push(stream);
           }
 
           // create the media recorder instance
-          this.mediaRecorder = new MediaRecorder(this.stream, this.options);
+          let mediaRecorder = new MediaRecorder(stream, this.options);
 
           // bind the method we'll call when data is available
-          this.mediaRecorder.ondataavailable = this.handleDataAvailable; // once finished capturing screen
+          mediaRecorder.ondataavailable = this.handleMainBuffer;
 
           // start recording
-          this.mediaRecorder.start();
+          mediaRecorder.start();
 
-        } else { // we're trying to record both
-          // ...
+          // add the media recorder to our array of media recorders
+          this.mediaRecorders.push(mediaRecorder);
+
+        } else { // we're trying to record multiple sources
+
+          let stream;
+          let mediaRecorder;
+
+          //
+          // camera
+          //
+
+          // camera stream
+          stream = await navigator.mediaDevices.getUserMedia(this.displayOptions);
+          this.streams.push(stream);
+
+          // create the media recorder instance for the camera
+          mediaRecorder = new MediaRecorder(stream, this.options);
+
+          // bind the method we'll call when data is available for the camera
+          mediaRecorder.ondataavailable = this.handleSecondaryBuffer;
+
+          // start recording the camera
+          mediaRecorder.start();
+
+          // add the camera media recorder to our array of media recorders
+          this.mediaRecorders.push(mediaRecorder);
+
+          //
+          // screen
+          //
+
+          // screen stream
+          stream = await navigator.mediaDevices.getDisplayMedia(this.displayOptions);
+          this.streams.push(stream);
+
+          // create the media recorder instance for the screen
+          mediaRecorder = new MediaRecorder(stream, this.options);
+
+          // bind the method we'll call when data is available for the screen
+          mediaRecorder.ondataavailable = this.handleMainBuffer;
+
+          // start recording the screen
+          mediaRecorder.start();
+
+          // add the screen media recorder to our array of media recorders
+          this.mediaRecorders.push(mediaRecorder);
+
         }
 
         this.isRecording = true;
@@ -141,29 +223,25 @@ export default {
       // resets our variables to the defaults
       this.filename = '';
       this.isRecording = false;
-      this.mediaRecorder = {};
-      this.recordedChunks = [];
+      this.mediaRecorders = [];
+      this.mainBuffer = [];
+      this.secondaryBuffer = [];
       this.source = '';
-      this.stream = {};
+      this.streams = [];
       this.url = '';
     },
     stopRecording() {
-      // stop the recorder
-      if (this.source === 'both') {
-        // ...
-      } else {
-        this.mediaRecorder.stop();
-      }
+      // stop the media recorders
+      this.mediaRecorders.forEach(mediaRecorder => {
+        mediaRecorder.stop();
+      })
 
       // stop the camera tracks
-      let tracks;
-      if (this.source === 'both') {
-        //...
-      } else {
-        tracks = this.stream.getTracks();
-      }
-      tracks.forEach((track) => {
-        track.stop();
+      this.streams.forEach(stream => {
+        let tracks = stream.getTracks();
+        tracks.forEach(track => {
+          track.stop();
+        })
       });
 
       this.isRecording = false;
