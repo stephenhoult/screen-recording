@@ -19,14 +19,40 @@
       </button>
     </div>
 
+    <div v-if="source === 'both'">
+      <p>Set camera position</p>
+      <button @click="camPosition='top-left'">Top left</button>
+      <button @click="camPosition='top-right'">Top right</button>
+      <br>
+      <button @click="camPosition='bottom-left'">Bottom left</button>
+      <button @click="camPosition='bottom-right'">Bottom right</button>
+    </div>
 
-    <div v-if="isRecording">
+
+    <div v-if="isRecording" class="main-buffer">
       <video
-          v-for="stream in streams"
-          :key="stream.id"
-          :src-object.prop.camel="stream"
+          :src-object.prop.camel="streams[0]"
           autoplay
       />
+
+      <div v-if="source === 'both'" :class="['secondary-buffer', camPosition]">
+        <video
+            :src-object.prop.camel="streams[1]"
+            autoplay
+        />
+      </div>
+    </div>
+
+    <div v-if="!isRecording && mainBufferUrl != ''" class="main-buffer">
+      <video>
+        <source :src="mainBufferUrl" type="video/webm">
+      </video>
+
+      <div v-if="source === 'both'" :class="['secondary-buffer', camPosition]">
+        <video>
+          <source :src="secondaryBufferUrl" type="video/webm">
+        </video>
+      </div>
     </div>
 
     <div v-if="mainBufferUrl !== ''">
@@ -34,17 +60,19 @@
 
       <input type="text" v-model="mainBufferFilename" placeholder="File name...">
 
-      <a :href="mainBufferUrl" :download="mainBufferDownloadLink" >
+      <a :href="mainBufferUrl" :download="mainBufferDownloadLink">
         <button>
           Download
         </button>
       </a>
+
+      <button @click="playPause">Play / Pause</button>
     </div>
 
     <div v-if="secondaryBufferUrl !== ''">
       <input type="text" v-model="secondaryBufferFilename" placeholder="File name...">
 
-      <a :href="secondaryBufferUrl" :download="secondaryBufferDownloadLink" >
+      <a :href="secondaryBufferUrl" :download="secondaryBufferDownloadLink">
         <button>
           Download
         </button>
@@ -82,6 +110,7 @@ export default {
   },
   data() {
     return {
+      camPosition: 'bottom-left',
       displayOptions: {
         audio: {
           echoCancellation: true,
@@ -93,7 +122,7 @@ export default {
         },
       },
       isRecording: false,
-      options: { mimeType: "video/webm; codecs=vp9" },
+      options: {mimeType: "video/webm; codecs=vp9"},
       mediaRecorders: [],
       mainBuffer: [],
       mainBufferFilename: '',
@@ -114,9 +143,9 @@ export default {
     },
     createDownloadLink(blob, type) {
       if (type === 'main') {
-        this.mainBufferUrl =  URL.createObjectURL(blob);
+        this.mainBufferUrl = URL.createObjectURL(blob);
       } else if (type === 'secondary') {
-        this.secondaryBufferUrl =  URL.createObjectURL(blob);
+        this.secondaryBufferUrl = URL.createObjectURL(blob);
       }
     },
     handleMainBuffer(event) {
@@ -133,6 +162,17 @@ export default {
         this.createVideo(this.secondaryBuffer, 'secondary');
       } else {
         console.log('No data available')
+      }
+    },
+    playPause() {
+      let videos = document.getElementsByTagName("video");
+
+      for (let i = 0; i < videos.length; i++) {
+        if (videos[i].paused) {
+          videos[i].play();
+        } else {
+          videos[i].pause();
+        }
       }
     },
     async record(source) {
@@ -168,48 +208,38 @@ export default {
 
         } else { // we're trying to record multiple sources
 
-          let stream;
-          let mediaRecorder;
-
-          //
-          // camera
-          //
-
-          // camera stream
-          stream = await navigator.mediaDevices.getUserMedia(this.displayOptions);
-          this.streams.push(stream);
-
-          // create the media recorder instance for the camera
-          mediaRecorder = new MediaRecorder(stream, this.options);
-
-          // bind the method we'll call when data is available for the camera
-          mediaRecorder.ondataavailable = this.handleSecondaryBuffer;
-
-          // start recording the camera
-          mediaRecorder.start();
-
-          // add the camera media recorder to our array of media recorders
-          this.mediaRecorders.push(mediaRecorder);
-
-          //
           // screen
-          //
-
           // screen stream
-          stream = await navigator.mediaDevices.getDisplayMedia(this.displayOptions);
-          this.streams.push(stream);
-
+          let screenStream = await navigator.mediaDevices.getDisplayMedia(this.displayOptions);
           // create the media recorder instance for the screen
-          mediaRecorder = new MediaRecorder(stream, this.options);
-
+          let screenMediaRecorder = new MediaRecorder(screenStream, this.options);
           // bind the method we'll call when data is available for the screen
-          mediaRecorder.ondataavailable = this.handleMainBuffer;
+          screenMediaRecorder.ondataavailable = this.handleMainBuffer;
 
-          // start recording the screen
-          mediaRecorder.start();
+          // camera
+          // camera stream
+          let camStream = await navigator.mediaDevices.getUserMedia({...this.displayOptions, audio:false});
+          // create the media recorder instance for the camera
+          let camMediaRecorder = new MediaRecorder(camStream, this.options);
+          // bind the method we'll call when data is available for the camera
+          camMediaRecorder.ondataavailable = this.handleSecondaryBuffer;
 
-          // add the screen media recorder to our array of media recorders
-          this.mediaRecorders.push(mediaRecorder);
+          // streams
+          this.streams.push(screenStream);
+          this.streams.push(camStream);
+
+          // add the media recorder to our array of media recorders
+          this.mediaRecorders.push(screenMediaRecorder);
+          this.mediaRecorders.push(camMediaRecorder);
+
+          console.log('waiting...');
+
+          setTimeout(() => {
+            console.log('recording...');
+            // start recording
+            screenMediaRecorder.start();
+            camMediaRecorder.start();
+          }, 3000);
 
         }
 
@@ -221,14 +251,14 @@ export default {
     },
     reset() {
       // resets our variables to the defaults
-      this.filename = '';
       this.isRecording = false;
-      this.mediaRecorders = [];
+      this.mainBufferFilename = '';
       this.mainBuffer = [];
+      this.mediaRecorders = [];
       this.secondaryBuffer = [];
+      this.secondaryBufferFilename = '';
       this.source = '';
       this.streams = [];
-      this.url = '';
     },
     stopRecording() {
       // stop the media recorders
@@ -258,7 +288,7 @@ export default {
   -moz-osx-font-smoothing: grayscale;
   text-align: center;
   color: #2c3e50;
-  margin-top: 60px;
+  margin-top: 20px;
 }
 
 button {
@@ -269,10 +299,56 @@ button {
   color: darkseagreen;
 }
 
+.main-buffer {
+  position: relative;
+  width: fit-content;
+  margin: 0 auto;
+}
+
+.secondary-buffer {
+  border-radius: 50%;
+  overflow: hidden;
+  z-index: 99;
+  position: absolute;
+  background: green;
+  width: 200px;
+  height: 200px;
+  padding: 0;
+  margin: 0;
+  box-shadow: 0px 0px 30px #ccc;
+}
+
+.secondary-buffer.bottom-left {
+  bottom: 40px;
+  left: 20px;
+}
+
+.secondary-buffer.bottom-right {
+  bottom: 40px;
+  right: 20px;
+}
+
+.secondary-buffer.top-left {
+  top: 40px;
+  left: 20px;
+}
+
+.secondary-buffer.top-right {
+  top: 40px;
+  right: 20px;
+}
+
+.secondary-buffer video {
+  height: 300px;
+  width: 300px;
+  margin-top: -25%;
+  margin-left: -23%;
+
+}
+
 video {
-  clear:both;
-  height:400px;
-  margin-left: 20px;
+  clear: both;
+  height: 800px;
 }
 
 </style>
