@@ -33,12 +33,14 @@
       <video
           :src-object.prop.camel="streams[0]"
           autoplay
+          muted
       />
 
       <div v-if="source === 'both'" :class="['secondary-buffer', camPosition]">
         <video
             :src-object.prop.camel="streams[1]"
             autoplay
+            muted
         />
       </div>
     </div>
@@ -58,15 +60,17 @@
     <div v-if="mainBufferUrl !== ''">
       <p class="green">Video recorded.</p>
 
-      <input type="text" v-model="mainBufferFilename" placeholder="File name...">
-
-      <a :href="mainBufferUrl" :download="mainBufferDownloadLink">
-        <button>
-          Download
-        </button>
-      </a>
-
       <button @click="playPause">Play / Pause</button>
+
+      <div>
+        <input type="text" v-model="mainBufferFilename" placeholder="File name...">
+        <a :href="mainBufferUrl" :download="mainBufferDownloadLink">
+          <button>
+            Download Main
+          </button>
+        </a>
+      </div>
+
     </div>
 
     <div v-if="secondaryBufferUrl !== ''">
@@ -74,7 +78,7 @@
 
       <a :href="secondaryBufferUrl" :download="secondaryBufferDownloadLink">
         <button>
-          Download
+          Download Camera
         </button>
       </a>
     </div>
@@ -122,7 +126,7 @@ export default {
         },
       },
       isRecording: false,
-      options: {mimeType: "video/webm; codecs=vp9"},
+      options: {mimeType: "video/webm;codecs=h264"},
       mediaRecorders: [],
       mainBuffer: [],
       mainBufferFilename: '',
@@ -193,18 +197,24 @@ export default {
             stream = await navigator.mediaDevices.getDisplayMedia(this.displayOptions);
             this.streams.push(stream);
           }
-
+          console.log(stream);
           // create the media recorder instance
           let mediaRecorder = new MediaRecorder(stream, this.options);
 
           // bind the method we'll call when data is available
           mediaRecorder.ondataavailable = this.handleMainBuffer;
 
-          // start recording
-          mediaRecorder.start();
-
           // add the media recorder to our array of media recorders
           this.mediaRecorders.push(mediaRecorder);
+
+          // this setTimeout is very important! It makes sure the webcam is ready and ensures the audio is in sync
+          console.log('3, 2, 1...');
+          setTimeout(() => {
+            console.log('recording...');
+            // start recording
+            mediaRecorder.start();
+          }, 3000);
+
 
         } else { // we're trying to record multiple sources
 
@@ -218,7 +228,7 @@ export default {
 
           // camera
           // camera stream
-          let camStream = await navigator.mediaDevices.getUserMedia({...this.displayOptions, audio:false});
+          let camStream = await navigator.mediaDevices.getUserMedia({...this.displayOptions});
           // create the media recorder instance for the camera
           let camMediaRecorder = new MediaRecorder(camStream, this.options);
           // bind the method we'll call when data is available for the camera
@@ -232,8 +242,8 @@ export default {
           this.mediaRecorders.push(screenMediaRecorder);
           this.mediaRecorders.push(camMediaRecorder);
 
-          console.log('waiting...');
-
+          // this setTimeout is very important! It makes sure the webcam is ready and ensures the audio is in sync
+          console.log('3, 2, 1...');
           setTimeout(() => {
             console.log('recording...');
             // start recording
