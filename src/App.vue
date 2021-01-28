@@ -197,7 +197,7 @@ export default {
             stream = await navigator.mediaDevices.getDisplayMedia(this.displayOptions);
             this.streams.push(stream);
           }
-          console.log(stream);
+
           // create the media recorder instance
           let mediaRecorder = new MediaRecorder(stream, this.options);
 
