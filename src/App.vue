@@ -31,6 +31,7 @@
 
     <div v-if="isRecording" class="main-buffer">
       <video
+          id="mainBuffer"
           :src-object.prop.camel="streams[0]"
           autoplay
           muted
@@ -38,6 +39,7 @@
 
       <div v-if="source === 'both'" :class="['secondary-buffer', camPosition]">
         <video
+            id="secondaryBuffer"
             :src-object.prop.camel="streams[1]"
             autoplay
             muted
@@ -45,19 +47,22 @@
       </div>
     </div>
 
-    <div v-if="!isRecording && mainBufferUrl != ''" class="main-buffer">
-      <video>
-        <source :src="mainBufferUrl" type="video/webm">
-      </video>
+    <div v-if="!isRecording && mainBufferUrl !== '' && showRecording" class="main-buffer">
+      <video id="mainBuffer" :src="mainBufferUrl" />
 
       <div v-if="source === 'both'" :class="['secondary-buffer', camPosition]">
-        <video>
-          <source :src="secondaryBufferUrl" type="video/webm">
-        </video>
+        <video id="secondaryBuffer" :src="secondaryBufferUrl" />
       </div>
     </div>
 
     <div v-if="mainBufferUrl !== ''">
+
+      <div>
+        <input type="text" v-model="trimStart">
+        <input type="text" v-model="trimEnd">
+        <button @click="applyTrim">Apply Trim</button>
+      </div>
+
       <p class="green">Video recorded.</p>
 
       <button @click="playPause">Play / Pause</button>
@@ -83,6 +88,7 @@
       </a>
     </div>
 
+    <div id="countdown" v-if="countdownTime"><p>{{countdownTime}}</p></div>
   </div>
 </template>
 
@@ -115,6 +121,8 @@ export default {
   data() {
     return {
       camPosition: 'bottom-left',
+      chunkSize: 1000, // milliseconds
+      countdownTime: 0,
       displayOptions: {
         audio: {
           echoCancellation: true,
@@ -134,28 +142,68 @@ export default {
       secondaryBuffer: [],
       secondaryBufferFilename: '',
       secondaryBufferUrl: '',
+      showRecording: false,
       source: '',
       streams: [],
+      trimStart: 0,
+      trimEnd: null,
     }
   },
   methods: {
-    createVideo(buffer, type) {
-      let blob = new Blob(buffer, {
+    applyTrim() {
+      if (this.trimStart < 0 || this.trimEnd > this.mainBuffer.length) {
+        console.log('invalid trim values');
+        return;
+      }
+      let trimmed = this.mainBuffer.slice(this.trimStart, this.trimEnd);
+
+      this.createVideo(trimmed, 'main');
+
+      if (this.source === 'both') {
+
+        if (this.trimStart < 0 || this.trimEnd > this.secondaryBuffer.length) {
+          console.log('invalid trim values');
+          return;
+        }
+        trimmed = this.secondaryBuffer.slice(this.trimStart, this.trimEnd);
+        this.createVideo(trimmed, 'secondary');
+      }
+    },
+    countdown() {
+      setTimeout(() => {
+        this.countdownTime -= 1;
+        if (this.countdownTime > 0) {
+          this.countdown();
+        } else {
+          this.startRecording();
+        }
+      }, 1000);
+    },
+    async createVideo(buffer, type) {
+      let blob = await new Blob(buffer, {
         type: "video/webm",
       });
+
+      if (type === 'main') {
+        this.mainBuffer = buffer;
+      } else if (type === 'secondary') {
+        this.secondaryBuffer = buffer;
+      }
       this.createDownloadLink(blob, type);
     },
     createDownloadLink(blob, type) {
       if (type === 'main') {
         this.mainBufferUrl = URL.createObjectURL(blob);
+        this.mainBufferUrl += '#t='+this.mainBuffer.length;
+        this.trimEnd = this.mainBuffer.length
       } else if (type === 'secondary') {
         this.secondaryBufferUrl = URL.createObjectURL(blob);
+        this.secondaryBufferUrl += '#t='+this.secondaryBuffer.length;
       }
     },
     handleMainBuffer(event) {
       if (event.data.size > 0) {
         this.mainBuffer.push(event.data);
-        this.createVideo(this.mainBuffer, 'main');
       } else {
         console.log('No data available')
       }
@@ -163,7 +211,6 @@ export default {
     handleSecondaryBuffer(event) {
       if (event.data.size > 0) {
         this.secondaryBuffer.push(event.data);
-        this.createVideo(this.secondaryBuffer, 'secondary');
       } else {
         console.log('No data available')
       }
@@ -207,15 +254,6 @@ export default {
           // add the media recorder to our array of media recorders
           this.mediaRecorders.push(mediaRecorder);
 
-          // this setTimeout is very important! It makes sure the webcam is ready and ensures the audio is in sync
-          console.log('3, 2, 1...');
-          setTimeout(() => {
-            console.log('recording...');
-            // start recording
-            mediaRecorder.start();
-          }, 3000);
-
-
         } else { // we're trying to record multiple sources
 
           // screen
@@ -241,19 +279,12 @@ export default {
           // add the media recorder to our array of media recorders
           this.mediaRecorders.push(screenMediaRecorder);
           this.mediaRecorders.push(camMediaRecorder);
-
-          // this setTimeout is very important! It makes sure the webcam is ready and ensures the audio is in sync
-          console.log('3, 2, 1...');
-          setTimeout(() => {
-            console.log('recording...');
-            // start recording
-            screenMediaRecorder.start();
-            camMediaRecorder.start();
-          }, 3000);
-
         }
 
-        this.isRecording = true;
+        // this setTimeout is very important! It makes sure the webcam is ready and ensures the audio is in sync
+        this.countdownTime = 3;
+        this.countdown();
+
       } catch (err) {
         console.error(err);
         this.isRecording = false;
@@ -267,24 +298,27 @@ export default {
       this.mediaRecorders = [];
       this.secondaryBuffer = [];
       this.secondaryBufferFilename = '';
+      this.showRecording = false;
       this.source = '';
       this.streams = [];
     },
-    stopRecording() {
+    startRecording() {
+      this.mediaRecorders.map(mediaRecorder => mediaRecorder.start(this.chunkSize));
+      this.isRecording = true;
+    },
+    async stopRecording() {
       // stop the media recorders
-      this.mediaRecorders.forEach(mediaRecorder => {
-        mediaRecorder.stop();
-      })
+      this.mediaRecorders.map(mediaRecorder => mediaRecorder.stop());
 
       // stop the camera tracks
-      this.streams.forEach(stream => {
-        let tracks = stream.getTracks();
-        tracks.forEach(track => {
-          track.stop();
-        })
-      });
+      this.streams.map(stream => stream.getTracks().map(track => track.stop()));
 
       this.isRecording = false;
+
+      await this.createVideo(this.mainBuffer, 'main');
+      await this.createVideo(this.secondaryBuffer, 'secondary');
+
+      this.showRecording = true;
     },
   }
 }
@@ -303,6 +337,25 @@ export default {
 
 button {
   margin: 5px;
+}
+
+#countdown {
+  position:absolute;
+  width:100%;
+  height:100%;
+  background: rgba(0, 0, 0, 0.7);
+  top:0;
+  left:0;
+  margin:0;
+  display: flex;
+  justify-content: center;
+}
+
+#countdown p {
+  font-size:100pt;
+  color:#fff;
+  font-weight: bold;
+  align-self: center;
 }
 
 .green {
